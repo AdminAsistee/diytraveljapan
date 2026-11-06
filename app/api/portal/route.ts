@@ -1,0 +1,13 @@
+import {env} from 'cloudflare:workers';
+import {initial,apply,recommendations} from '../../../lib/portal-core.mjs';
+export const dynamic='force-dynamic';
+const reply=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'private, no-store','Vary':'Cookie','X-Content-Type-Options':'nosniff'}});
+export async function GET(req:Request){const user=req.headers.get('oai-authenticated-user-id');if(!user)return reply({error:'Sign in to save across devices.'},401);if(!env.DB)return reply({error:'Account storage is unavailable.'},503);const row=await env.DB.prepare('SELECT data,version FROM accounts WHERE user_id=?').bind(user).first<{data:string,version:number}>();const data=row?JSON.parse(row.data):initial();return reply({data,version:row?.version??0,recommendations:recommendations(data)});}
+export async function POST(req:Request){const user=req.headers.get('oai-authenticated-user-id');if(!user)return reply({error:'Sign in first.'},401);if(req.headers.get('origin')!==new URL(req.url).origin)return reply({error:'Invalid request origin.'},403);if(!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'JSON required.'},415);if(!env.DB)return reply({error:'Storage unavailable.'},503);const raw=await req.text();if(raw.length>30000)return reply({error:'Request too large.'},413);let action:any;try{action=JSON.parse(raw)}catch{return reply({error:'Invalid JSON.'},400)}
+ await env.DB.prepare('INSERT OR IGNORE INTO accounts (user_id,data,version) VALUES (?,?,0)').bind(user,JSON.stringify(initial())).run();
+ const row=await env.DB.prepare('SELECT data,version FROM accounts WHERE user_id=?').bind(user).first<{data:string,version:number}>();if(!row)return reply({error:'Storage unavailable.'},503);
+ if(action.version!==row.version)return reply({error:'Your account changed in another tab or device. Reload before saving; keep a copy of your edits.'},409);
+ if(action.type==='deleteAll'){const result=await env.DB.prepare('DELETE FROM accounts WHERE user_id=? AND version=?').bind(user,row.version).run();if(!result.meta.changes)return reply({error:'Account changed. Reload.'},409);return reply({deleted:true});}
+ let data;try{data=apply(JSON.parse(row.data),action)}catch(e){return reply({error:(e as Error).message},400)}
+ const result=await env.DB.prepare('UPDATE accounts SET data=?,version=version+1 WHERE user_id=? AND version=?').bind(JSON.stringify(data),user,row.version).run();if(!result.meta.changes)return reply({error:'Account changed. Reload before saving.'},409);return reply({data,version:row.version+1,recommendations:recommendations(data)});
+}

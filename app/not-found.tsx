@@ -1,0 +1,1 @@
+export default function NotFound(){return <main style={{maxWidth:680,margin:"80px auto",padding:24,fontFamily:"Arial"}}><h1>Let’s find your next stop.</h1><p>This page could not be found.</p><p><a href="/">Return home</a> · <a href="/destinations/">Explore destinations</a> · <a href="/my-trip/">Open My Trip</a></p></main>}
